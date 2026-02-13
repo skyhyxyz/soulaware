@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Soulaware POC
 
-## Getting Started
+Soulaware is a web-first AI life guidance coach (non-clinical) for purpose mapping, reflection, and practical next actions.
 
-First, run the development server:
+## Stack
+
+- Next.js 16 + TypeScript + Tailwind CSS
+- OpenAI API (`gpt-4.1-mini` by default)
+- Supabase Postgres (with in-memory fallback when env vars are missing)
+- Vercel-ready deployment
+
+## Quick Start
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Configure environment:
+
+```bash
+cp .env.example .env.local
+```
+
+3. Fill values in `.env.local`:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL` (optional)
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+4. Run the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+App routes:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `/` landing
+- `/chat` main Soulaware chat
+- `/snapshot/:id` purpose snapshot view
+- `/legal` legal/safety page
+- `/settings` guest data controls
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Supabase Setup
 
-## Learn More
+Apply migration:
 
-To learn more about Next.js, take a look at the following resources:
+- `supabase/migrations/0001_soulaware_poc.sql`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Tables included:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `guest_sessions`
+- `chat_messages`
+- `purpose_snapshots`
+- `safety_events`
+- `analytics_events`
 
-## Deploy on Vercel
+## API Endpoints
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `POST /api/chat/message`
+- `GET /api/chat/history`
+- `POST /api/purpose-snapshot`
+- `GET /api/purpose-snapshot/:id`
+- `POST /api/data/delete`
+- `POST /api/session/clear`
+- `POST /api/analytics`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Safety Behavior
+
+- Rule-based high-risk phrase detection
+- OpenAI moderation check (`omni-moderation-latest`)
+- If high risk is triggered, Soulaware returns safety-only guidance with US resources:
+  - Call/text `988`
+  - Call `911` for immediate danger
+
+## Notes
+
+- Guest mode is the only auth mode in this POC.
+- Chat requires accepting a non-clinical disclaimer before sending the first message.
+- Data can be cleared from `/settings` or deleted from `/legal`.
