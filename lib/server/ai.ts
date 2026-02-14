@@ -1026,3 +1026,9 @@ export async function generatePurposeSnapshot(params: {
 
   return fallbackSnapshot(params.history);
 }
+
+export {
+  generateCoachReplyV2,
+  type GenerateCoachReplyV2Params,
+  type GenerateCoachReplyV2Result,
+} from "@/lib/server/ai-v2";

@@ -3,10 +3,12 @@ import { env, hasSupabase } from "@/lib/server/env";
 import type {
   AnalyticsEvent,
   AnalyticsEventName,
+  ChatSessionState,
   ChatHistoryMessage,
   ChatRole,
   GuestSession,
   PromptMode,
+  RecentMessageSlices,
   SafetyEvent,
   SafetyLevel,
   StoredPurposeSnapshot,
@@ -14,6 +16,7 @@ import type {
 
 type MemoryStore = {
   sessions: GuestSession[];
+  sessionStates: ChatSessionState[];
   messages: Array<{
     id: string;
     sessionId: string;
@@ -52,6 +55,26 @@ type SnapshotRow = {
   created_at: string;
 };
 
+type SessionStateRow = {
+  session_id: string;
+  rolling_summary: string;
+  user_facts_json: string[];
+  open_loops_json: string[];
+  pending_clarifier: boolean;
+  clarifier_topic: string;
+  last_lens: string;
+  last_model: string;
+  updated_at: string;
+};
+
+type AnalyticsRow = {
+  id: string;
+  guest_id: string;
+  event_name: AnalyticsEventName;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 const globalStore = globalThis as unknown as {
   __soulawareMemoryStore?: MemoryStore;
 };
@@ -60,6 +83,7 @@ function getMemoryStore(): MemoryStore {
   if (!globalStore.__soulawareMemoryStore) {
     globalStore.__soulawareMemoryStore = {
       sessions: [],
+      sessionStates: [],
       messages: [],
       snapshots: [],
       safetyEvents: [],
@@ -113,6 +137,31 @@ function mapSnapshot(row: SnapshotRow): StoredPurposeSnapshot {
     values: Array.isArray(row.values_json) ? row.values_json : [],
     nextActions: Array.isArray(row.next_actions_json) ? row.next_actions_json : [],
     createdAt: row.created_at,
+  };
+}
+
+function mapSessionState(row: SessionStateRow): ChatSessionState {
+  const supportedLenses = new Set([
+    "clarify",
+    "blocker",
+    "values",
+    "experiment",
+    "decision",
+    "accountability",
+  ]);
+
+  const lastLens = supportedLenses.has(row.last_lens) ? row.last_lens : "";
+
+  return {
+    sessionId: row.session_id,
+    rollingSummary: row.rolling_summary ?? "",
+    userFacts: Array.isArray(row.user_facts_json) ? row.user_facts_json : [],
+    openLoops: Array.isArray(row.open_loops_json) ? row.open_loops_json : [],
+    pendingClarifier: Boolean(row.pending_clarifier),
+    clarifierTopic: row.clarifier_topic ?? "",
+    lastLens: lastLens as ChatSessionState["lastLens"],
+    lastModel: row.last_model ?? "",
+    updatedAt: row.updated_at,
   };
 }
 
@@ -177,6 +226,163 @@ export async function getOrCreateSession(guestId: string): Promise<GuestSession>
   }
 
   return mapSession(createdResult.data);
+}
+
+export async function getOrCreateSessionState(
+  sessionId: string,
+): Promise<ChatSessionState> {
+  const now = new Date().toISOString();
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    const store = getMemoryStore();
+    const existing = store.sessionStates.find((state) => state.sessionId === sessionId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const created: ChatSessionState = {
+      sessionId,
+      rollingSummary: "",
+      userFacts: [],
+      openLoops: [],
+      pendingClarifier: false,
+      clarifierTopic: "",
+      lastLens: "",
+      lastModel: "",
+      updatedAt: now,
+    };
+
+    store.sessionStates.push(created);
+    return created;
+  }
+
+  const existingResult = await supabase
+    .from("chat_session_state")
+    .select(
+      "session_id, rolling_summary, user_facts_json, open_loops_json, pending_clarifier, clarifier_topic, last_lens, last_model, updated_at",
+    )
+    .eq("session_id", sessionId)
+    .maybeSingle<SessionStateRow>();
+
+  if (existingResult.error) {
+    throw new Error(
+      `Unable to fetch session state: ${existingResult.error.message}`,
+    );
+  }
+
+  if (existingResult.data) {
+    return mapSessionState(existingResult.data);
+  }
+
+  const createdResult = await supabase
+    .from("chat_session_state")
+    .insert({ session_id: sessionId, updated_at: now })
+    .select(
+      "session_id, rolling_summary, user_facts_json, open_loops_json, pending_clarifier, clarifier_topic, last_lens, last_model, updated_at",
+    )
+    .single<SessionStateRow>();
+
+  if (createdResult.error || !createdResult.data) {
+    throw new Error(
+      `Unable to create session state: ${
+        createdResult.error?.message ?? "unknown error"
+      }`,
+    );
+  }
+
+  return mapSessionState(createdResult.data);
+}
+
+export async function updateSessionState(
+  sessionId: string,
+  patch: Partial<Omit<ChatSessionState, "sessionId" | "updatedAt">>,
+): Promise<ChatSessionState> {
+  const now = new Date().toISOString();
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    const store = getMemoryStore();
+    const existing = await getOrCreateSessionState(sessionId);
+    const merged: ChatSessionState = {
+      ...existing,
+      ...patch,
+      updatedAt: now,
+    };
+
+    store.sessionStates = store.sessionStates.map((state) =>
+      state.sessionId === sessionId ? merged : state,
+    );
+
+    return merged;
+  }
+
+  const payload: Record<string, unknown> = {
+    session_id: sessionId,
+    updated_at: now,
+  };
+
+  if (typeof patch.rollingSummary === "string") {
+    payload.rolling_summary = patch.rollingSummary;
+  }
+
+  if (Array.isArray(patch.userFacts)) {
+    payload.user_facts_json = patch.userFacts;
+  }
+
+  if (Array.isArray(patch.openLoops)) {
+    payload.open_loops_json = patch.openLoops;
+  }
+
+  if (typeof patch.pendingClarifier === "boolean") {
+    payload.pending_clarifier = patch.pendingClarifier;
+  }
+
+  if (typeof patch.clarifierTopic === "string") {
+    payload.clarifier_topic = patch.clarifierTopic;
+  }
+
+  if (typeof patch.lastLens === "string") {
+    payload.last_lens = patch.lastLens;
+  }
+
+  if (typeof patch.lastModel === "string") {
+    payload.last_model = patch.lastModel;
+  }
+
+  const result = await supabase
+    .from("chat_session_state")
+    .upsert(payload, { onConflict: "session_id" })
+    .select(
+      "session_id, rolling_summary, user_facts_json, open_loops_json, pending_clarifier, clarifier_topic, last_lens, last_model, updated_at",
+    )
+    .single<SessionStateRow>();
+
+  if (result.error || !result.data) {
+    throw new Error(
+      `Unable to update session state: ${result.error?.message ?? "unknown error"}`,
+    );
+  }
+
+  return mapSessionState(result.data);
+}
+
+export async function listRecentMessages(
+  sessionId: string,
+  limit: number,
+): Promise<RecentMessageSlices> {
+  const allMessages = await listMessages(sessionId, limit);
+  const userMessages = allMessages.filter((message) => message.role === "user");
+  const assistantMessages = allMessages.filter(
+    (message) => message.role === "assistant",
+  );
+
+  return {
+    allMessages,
+    userMessages,
+    assistantMessages,
+  };
 }
 
 export async function listMessages(
@@ -470,6 +676,9 @@ export async function clearSessionData(guestId: string): Promise<void> {
 
     store.messages = store.messages.filter((entry) => entry.sessionId !== session.id);
     store.snapshots = store.snapshots.filter((entry) => entry.sessionId !== session.id);
+    store.sessionStates = store.sessionStates.filter(
+      (entry) => entry.sessionId !== session.id,
+    );
     store.safetyEvents = store.safetyEvents.filter(
       (entry) => entry.guestId !== guestId,
     );
@@ -497,6 +706,7 @@ export async function clearSessionData(guestId: string): Promise<void> {
   await Promise.all([
     supabase.from("chat_messages").delete().eq("session_id", sessionId),
     supabase.from("purpose_snapshots").delete().eq("session_id", sessionId),
+    supabase.from("chat_session_state").delete().eq("session_id", sessionId),
     supabase.from("safety_events").delete().eq("session_id", sessionId),
   ]);
 }
@@ -512,6 +722,9 @@ export async function deleteGuestData(guestId: string): Promise<void> {
 
     store.messages = store.messages.filter((entry) => !sessionIds.includes(entry.sessionId));
     store.snapshots = store.snapshots.filter(
+      (entry) => !sessionIds.includes(entry.sessionId),
+    );
+    store.sessionStates = store.sessionStates.filter(
       (entry) => !sessionIds.includes(entry.sessionId),
     );
     store.sessions = store.sessions.filter((entry) => entry.guestId !== guestId);
@@ -537,6 +750,7 @@ export async function deleteGuestData(guestId: string): Promise<void> {
     await Promise.all([
       supabase.from("chat_messages").delete().in("session_id", sessionIds),
       supabase.from("purpose_snapshots").delete().in("session_id", sessionIds),
+      supabase.from("chat_session_state").delete().in("session_id", sessionIds),
       supabase.from("safety_events").delete().in("session_id", sessionIds),
     ]);
   }
@@ -578,4 +792,38 @@ export async function trackEvent(params: {
   if (result.error) {
     throw new Error(`Unable to track analytics event: ${result.error.message}`);
   }
+}
+
+export async function getAnalyticsEventsSince(
+  sinceIso: string,
+): Promise<AnalyticsEvent[]> {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    const store = getMemoryStore();
+    return store.analyticsEvents
+      .filter((event) => event.createdAt >= sinceIso)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  const result = await supabase
+    .from("analytics_events")
+    .select("id, guest_id, event_name, metadata, created_at")
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: true });
+
+  if (result.error) {
+    throw new Error(`Unable to load analytics events: ${result.error.message}`);
+  }
+
+  return (result.data ?? []).map((row) => {
+    const typed = row as AnalyticsRow;
+    return {
+      id: typed.id,
+      guestId: typed.guest_id,
+      eventName: typed.event_name,
+      metadata: typed.metadata ?? {},
+      createdAt: typed.created_at,
+    };
+  });
 }

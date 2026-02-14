@@ -10,6 +10,11 @@ const allowedEvents: AnalyticsEventName[] = [
   "snapshot_created",
   "safety_triggered",
   "returned_within_7d",
+  "chat_model_selected",
+  "chat_retry_for_uniqueness",
+  "chat_clarifier_triggered",
+  "chat_summary_updated",
+  "chat_low_quality_fallback",
 ];
 
 export async function POST(request: NextRequest) {

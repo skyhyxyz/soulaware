@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { generateCoachReply, renderCoachReply } from "@/lib/server/ai";
+import {
+  generateCoachReply,
+  generateCoachReplyV2,
+  renderCoachReply,
+} from "@/lib/server/ai";
+import { env } from "@/lib/server/env";
 import { readGuestId } from "@/lib/server/guest";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import {
@@ -8,11 +13,63 @@ import {
   createSafetyEvent,
   getLatestSnapshotForSession,
   getOrCreateSession,
+  getOrCreateSessionState,
   listMessages,
+  listRecentMessages,
   trackEvent,
+  updateSessionState,
 } from "@/lib/server/repository";
 import { evaluateSafety, getSafetyResponseText } from "@/lib/server/safety";
 import type { ChatMessageRequest, ChatMessageResponse } from "@/types/domain";
+
+function rolloutBucket(value: string): number {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash) % 100;
+}
+
+function shouldUseChatV2(guestId: string): boolean {
+  if (env.soulawareChatEngine !== "v2") {
+    return false;
+  }
+
+  const percent = Number.isFinite(env.soulawareChatV2Percent)
+    ? Math.max(0, Math.min(100, Math.floor(env.soulawareChatV2Percent)))
+    : 0;
+
+  if (percent <= 0) {
+    return false;
+  }
+
+  if (percent >= 100) {
+    return true;
+  }
+
+  return rolloutBucket(guestId) < percent;
+}
+
+async function safeTrackEvent(params: {
+  guestId: string;
+  eventName:
+    | "chat_model_selected"
+    | "chat_retry_for_uniqueness"
+    | "chat_clarifier_triggered"
+    | "chat_summary_updated"
+    | "chat_low_quality_fallback"
+    | "safety_triggered";
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await trackEvent(params);
+  } catch (error) {
+    console.error("[Soulaware] trackEvent failed", error);
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,9 +99,7 @@ export async function POST(request: NextRequest) {
 
     const forwardedFor = request.headers.get("x-forwarded-for");
     const resolvedIp =
-      forwardedFor?.split(",")[0]?.trim() ??
-      request.headers.get("x-real-ip") ??
-      "unknown";
+      forwardedFor?.split(",")[0]?.trim() ?? request.headers.get("x-real-ip") ?? "unknown";
 
     const [guestLimit, ipLimit] = await Promise.all([
       enforceRateLimit(`guest:${guestId}`),
@@ -100,10 +155,10 @@ export async function POST(request: NextRequest) {
         mode: "safety",
       });
 
-      await trackEvent({
+      await safeTrackEvent({
         guestId,
         eventName: "safety_triggered",
-        metadata: { reason: safety.reason },
+        metadata: { reason: safety.reason, engine: "safety" },
       });
 
       const response: ChatMessageResponse = {
@@ -111,13 +166,115 @@ export async function POST(request: NextRequest) {
         mode: "safety",
         messageId: assistantMessage.id,
         safetyTriggered: true,
+        responseKind: "safety",
+        modelUsed: "safety-guardrail",
+        clarifierPending: false,
+      };
+
+      return NextResponse.json(response);
+    }
+
+    const latestSnapshot = await getLatestSnapshotForSession(session.id);
+
+    if (shouldUseChatV2(guestId)) {
+      const messageSlices = await listRecentMessages(session.id, 24);
+      const sessionState = await getOrCreateSessionState(session.id);
+      const startedAt = Date.now();
+
+      const v2Result = await generateCoachReplyV2({
+        text,
+        history: messageSlices.allMessages,
+        latestSnapshot,
+        sessionState,
+      });
+
+      await updateSessionState(session.id, v2Result.sessionStatePatch);
+
+      const assistantMessage = await createMessage({
+        sessionId: session.id,
+        role: "assistant",
+        content: v2Result.reply,
+        mode: "coach",
+      });
+
+      const latencyMs = Date.now() - startedAt;
+
+      await safeTrackEvent({
+        guestId,
+        eventName: "chat_model_selected",
+        metadata: {
+          engine: "v2",
+          modelUsed: v2Result.modelUsed,
+          lens: v2Result.lens,
+          responseKind: v2Result.responseKind,
+          retryCount: v2Result.retryCount,
+          approximateTokens: v2Result.approximateTokens,
+          estimatedCostUsd: v2Result.estimatedCostUsd,
+          latencyMs,
+        },
+      });
+
+      if (v2Result.retryCount > 0) {
+        await safeTrackEvent({
+          guestId,
+          eventName: "chat_retry_for_uniqueness",
+          metadata: {
+            engine: "v2",
+            retryCount: v2Result.retryCount,
+            modelUsed: v2Result.modelUsed,
+          },
+        });
+      }
+
+      if (v2Result.responseKind === "clarify") {
+        await safeTrackEvent({
+          guestId,
+          eventName: "chat_clarifier_triggered",
+          metadata: {
+            engine: "v2",
+            lens: v2Result.lens,
+          },
+        });
+      }
+
+      if (v2Result.summaryUpdated) {
+        await safeTrackEvent({
+          guestId,
+          eventName: "chat_summary_updated",
+          metadata: {
+            engine: "v2",
+            modelUsed: env.openAiSummaryModel,
+          },
+        });
+      }
+
+      if (v2Result.lowQualityFallback) {
+        await safeTrackEvent({
+          guestId,
+          eventName: "chat_low_quality_fallback",
+          metadata: {
+            engine: "v2",
+            lens: v2Result.lens,
+            modelUsed: v2Result.modelUsed,
+          },
+        });
+      }
+
+      const response: ChatMessageResponse = {
+        reply: v2Result.reply,
+        mode: "coach",
+        messageId: assistantMessage.id,
+        safetyTriggered: false,
+        responseKind: v2Result.responseKind,
+        modelUsed: v2Result.modelUsed,
+        lens: v2Result.lens,
+        clarifierPending: v2Result.clarifierPending,
       };
 
       return NextResponse.json(response);
     }
 
     const history = await listMessages(session.id, 12);
-    const latestSnapshot = await getLatestSnapshotForSession(session.id);
     const draft = await generateCoachReply({
       text,
       history,
@@ -133,21 +290,31 @@ export async function POST(request: NextRequest) {
       mode: "coach",
     });
 
+    await safeTrackEvent({
+      guestId,
+      eventName: "chat_model_selected",
+      metadata: {
+        engine: "v1",
+        modelUsed: env.openAiModel,
+        responseKind: "coach",
+      },
+    });
+
     const response: ChatMessageResponse = {
       reply: replyText,
       mode: "coach",
       messageId: assistantMessage.id,
       safetyTriggered: false,
+      responseKind: "coach",
+      modelUsed: env.openAiModel,
+      clarifierPending: false,
     };
 
     return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to process chat message.",
+        error: error instanceof Error ? error.message : "Unable to process chat message.",
       },
       { status: 500 },
     );

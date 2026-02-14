@@ -27,10 +27,18 @@ cp .env.example .env.local
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL` (optional)
+- `OPENAI_CHAT_MODEL_PRIMARY` (recommended: `gpt-4.1`)
+- `OPENAI_CHAT_MODEL_FAST` (recommended: `gpt-4.1-mini`)
+- `OPENAI_SUMMARY_MODEL` (recommended: `gpt-4.1-mini`)
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `UPSTASH_REDIS_REST_URL` (optional but recommended for production rate limits)
 - `UPSTASH_REDIS_REST_TOKEN` (optional but recommended for production rate limits)
+- `SOULAWARE_CHAT_ENGINE` (`v1` or `v2`)
+- `SOULAWARE_CHAT_V2_PERCENT` (`0-100`, used when engine is `v2`)
+- `SOULAWARE_COST_ALERT_DAILY_USD` (optional soft alert threshold)
+- `SOULAWARE_COST_ALERT_WEBHOOK_URL` (optional webhook target for cost alerts)
+- `CRON_SECRET` (required to call ops cost endpoint)
 
 4. Run the app:
 
@@ -51,6 +59,7 @@ App routes:
 Apply migration:
 
 - `supabase/migrations/0001_soulaware_poc.sql`
+- `supabase/migrations/0002_chat_intelligence_v2.sql`
 
 Tables included:
 
@@ -59,6 +68,7 @@ Tables included:
 - `purpose_snapshots`
 - `safety_events`
 - `analytics_events`
+- `chat_session_state`
 
 ## API Endpoints
 
@@ -69,6 +79,7 @@ Tables included:
 - `POST /api/data/delete`
 - `POST /api/session/clear`
 - `POST /api/analytics`
+- `GET /api/ops/cost-alert` (cron-protected)
 
 ## Safety Behavior
 
@@ -84,6 +95,18 @@ Tables included:
 - Upstash Redis is used when configured.
 - If Upstash env vars are missing, a local in-memory limiter is used as fallback.
 - Over-limit requests return `429 Too Many Requests`.
+
+## Chat Intelligence v2
+
+- Feature-flagged orchestration is available via:
+  - `SOULAWARE_CHAT_ENGINE=v2`
+  - `SOULAWARE_CHAT_V2_PERCENT=10` (progressive rollout)
+- v2 adds:
+  - hybrid model routing (`primary` vs `fast`)
+  - low-information clarifier turns
+  - rolling memory summaries and open loops
+  - anti-duplication retry and low-quality fallback handling
+  - per-turn telemetry (`chat_model_selected`, retry/clarifier/summary/fallback events)
 
 ## Notes
 

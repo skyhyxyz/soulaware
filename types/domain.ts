@@ -4,6 +4,16 @@ export type SafetyLevel = "none" | "elevated" | "high";
 
 export type ChatRole = "user" | "assistant";
 
+export type CoachingLens =
+  | "clarify"
+  | "blocker"
+  | "values"
+  | "experiment"
+  | "decision"
+  | "accountability";
+
+export type ChatResponseKind = "clarify" | "coach" | "safety";
+
 export type ChatMessageRequest = {
   text: string;
 };
@@ -13,6 +23,10 @@ export type ChatMessageResponse = {
   mode: PromptMode;
   messageId: string;
   safetyTriggered: boolean;
+  responseKind?: ChatResponseKind;
+  modelUsed?: string;
+  lens?: CoachingLens;
+  clarifierPending?: boolean;
 };
 
 export type ChatHistoryMessage = {
@@ -72,12 +86,35 @@ export type StoredPurposeSnapshot = {
   createdAt: string;
 };
 
+export type ChatSessionState = {
+  sessionId: string;
+  rollingSummary: string;
+  userFacts: string[];
+  openLoops: string[];
+  pendingClarifier: boolean;
+  clarifierTopic: string;
+  lastLens: CoachingLens | "";
+  lastModel: string;
+  updatedAt: string;
+};
+
+export type RecentMessageSlices = {
+  allMessages: ChatHistoryMessage[];
+  userMessages: ChatHistoryMessage[];
+  assistantMessages: ChatHistoryMessage[];
+};
+
 export type AnalyticsEventName =
   | "session_started"
   | "message_sent"
   | "snapshot_created"
   | "safety_triggered"
-  | "returned_within_7d";
+  | "returned_within_7d"
+  | "chat_model_selected"
+  | "chat_retry_for_uniqueness"
+  | "chat_clarifier_triggered"
+  | "chat_summary_updated"
+  | "chat_low_quality_fallback";
 
 export type AnalyticsEvent = {
   id: string;
