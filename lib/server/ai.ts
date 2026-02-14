@@ -332,10 +332,135 @@ function fallbackSnapshot(messages: ChatHistoryMessage[]): PurposeSnapshotDraft 
   };
 }
 
+function flattenCoachReply(reply: CoachReply): string {
+  return `${reply.reflection} ${reply.actionStep} ${reply.deeperQuestion}`;
+}
+
+function stripCoachLabel(value: string): string {
+  return value
+    .replace(/^reflection\s*:/i, "")
+    .replace(/^action\s*step\s*:/i, "")
+    .replace(/^deeper\s*question\s*:/i, "")
+    .trim();
+}
+
+function normalizeForComparison(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/^reflection\s*:/gim, "")
+    .replace(/^action\s*step\s*:/gim, "")
+    .replace(/^deeper\s*question\s*:/gim, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function lexicalOverlapScore(a: string, b: string): number {
+  const wordsA = new Set(
+    normalizeForComparison(a)
+      .split(" ")
+      .map((word) => word.trim())
+      .filter((word) => word.length >= 4),
+  );
+  const wordsB = new Set(
+    normalizeForComparison(b)
+      .split(" ")
+      .map((word) => word.trim())
+      .filter((word) => word.length >= 4),
+  );
+
+  if (wordsA.size === 0 || wordsB.size === 0) {
+    return 0;
+  }
+
+  let intersection = 0;
+  for (const word of wordsA) {
+    if (wordsB.has(word)) {
+      intersection += 1;
+    }
+  }
+
+  return intersection / Math.min(wordsA.size, wordsB.size);
+}
+
+function listRecentAssistantCoachTexts(
+  history: ChatHistoryMessage[],
+  limit: number,
+): string[] {
+  return history
+    .filter((message) => message.role === "assistant" && message.mode === "coach")
+    .slice(-limit)
+    .map((message) => message.content);
+}
+
+function isReplyTooSimilarToRecent(
+  reply: CoachReply,
+  history: ChatHistoryMessage[],
+): boolean {
+  const candidate = flattenCoachReply(reply);
+  const candidateNormalized = normalizeForComparison(candidate);
+  const recentAssistantTexts = listRecentAssistantCoachTexts(history, 3);
+
+  for (const previous of recentAssistantTexts) {
+    const previousNormalized = normalizeForComparison(previous);
+
+    if (!previousNormalized) {
+      continue;
+    }
+
+    if (candidateNormalized === previousNormalized) {
+      return true;
+    }
+
+    const overlap = lexicalOverlapScore(candidate, previous);
+    if (overlap >= 0.72) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildAvoidPhraseBlock(history: ChatHistoryMessage[]): string {
+  const sourceTexts = listRecentAssistantCoachTexts(history, 2);
+  const phrases: string[] = [];
+
+  for (const text of sourceTexts) {
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = stripCoachLabel(rawLine);
+      if (!line) {
+        continue;
+      }
+
+      phrases.push(line.slice(0, 90));
+
+      if (phrases.length >= 6) {
+        break;
+      }
+    }
+
+    if (phrases.length >= 6) {
+      break;
+    }
+  }
+
+  if (phrases.length === 0) {
+    return "";
+  }
+
+  const unique = Array.from(new Set(phrases));
+  return unique.map((phrase, index) => `${index + 1}. "${phrase}"`).join("\n");
+}
+
 function formatConversationContext(messages: ChatHistoryMessage[]): string {
-  return messages
-    .slice(-12)
-    .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+  const recentUserTurns = messages.filter((message) => message.role === "user").slice(-8);
+
+  if (recentUserTurns.length === 0) {
+    return "No previous user messages.";
+  }
+
+  return recentUserTurns
+    .map((message, index) => `USER_${index + 1}: ${message.content}`)
     .join("\n");
 }
 
@@ -370,7 +495,9 @@ export async function generateCoachReply(params: {
     return fallbackCoachReply(params.text, params.history);
   }
 
-  const baseUserMessage = [
+  const avoidPhraseBlock = buildAvoidPhraseBlock(params.history);
+
+  const baseUserParts = [
     "Context from the latest conversation:",
     formatConversationContext(params.history),
     "",
@@ -378,16 +505,30 @@ export async function generateCoachReply(params: {
     formatSnapshotContext(params.latestSnapshot),
     "",
     `Current user message: ${params.text}`,
-  ].join("\n");
+  ];
+
+  if (avoidPhraseBlock) {
+    baseUserParts.push(
+      "",
+      "Avoid reusing these recent assistant phrases:",
+      avoidPhraseBlock,
+    );
+  }
+
+  const baseUserMessage = baseUserParts.join("\n");
 
   const jsonPrompt = [
     "You are Soulaware, an AI life guidance coach.",
     "You are not a licensed therapist and must avoid clinical diagnosis claims.",
     "Respond with practical, compassionate coaching for adults.",
+    "Use at least one concrete phrase from the current user message in the action step.",
     "Do not repeat exact wording from prior assistant messages in the context.",
+    "Each answer should offer a fresh angle, not a template.",
     "Output strict JSON only with keys: reflection, actionStep, deeperQuestion.",
     "Each field must be one to two sentences and under 70 words.",
   ].join(" ");
+
+  let needsVariationRetry = false;
 
   try {
     const completion = await client.chat.completions.create({
@@ -410,8 +551,12 @@ export async function generateCoachReply(params: {
     const parsed =
       normalizeCoachReply(extractJsonObject(raw)) ?? parseLabeledCoachReply(raw);
 
-    if (parsed) {
+    if (parsed && !isReplyTooSimilarToRecent(parsed, params.history)) {
       return parsed;
+    }
+
+    if (parsed) {
+      needsVariationRetry = true;
     }
   } catch (error) {
     console.error("[Soulaware] JSON coach response failed", error);
@@ -424,7 +569,11 @@ export async function generateCoachReply(params: {
     "Reflection: ...",
     "Action step: ...",
     "Deeper question: ...",
+    "Use at least one concrete phrase from the current user message in the action step.",
     "Do not repeat exact wording from prior assistant messages.",
+    needsVariationRetry
+      ? "Your prior draft was too similar to earlier replies. Make this response materially different."
+      : "",
   ].join(" ");
 
   try {
@@ -447,7 +596,7 @@ export async function generateCoachReply(params: {
     const parsed =
       parseLabeledCoachReply(raw) ?? normalizeCoachReply(extractJsonObject(raw));
 
-    if (parsed) {
+    if (parsed && !isReplyTooSimilarToRecent(parsed, params.history)) {
       return parsed;
     }
   } catch (error) {
