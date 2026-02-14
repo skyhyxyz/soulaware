@@ -46,15 +46,144 @@ function extractJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
+function normalizeTextValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (Array.isArray(value)) {
+    const firstString = value.find((entry): entry is string => typeof entry === "string");
+    return firstString?.trim() ?? "";
+  }
+
+  return "";
+}
+
+function pickString(data: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    if (key in data) {
+      const value = normalizeTextValue(data[key]);
+
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return "";
+}
+
+function pickStringArray(data: Record<string, unknown>, keys: string[]): string[] {
+  for (const key of keys) {
+    if (!(key in data)) {
+      continue;
+    }
+
+    const value = data[key];
+
+    if (Array.isArray(value)) {
+      const filtered = value
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+      if (filtered.length > 0) {
+        return filtered;
+      }
+    }
+
+    if (typeof value === "string") {
+      const split = value
+        .split(/\n|\||,/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+      if (split.length > 0) {
+        return split;
+      }
+    }
+  }
+
+  return [];
+}
+
+function parseLabeledCoachReply(raw: string): CoachReply | null {
+  const sections: CoachReply = {
+    reflection: "",
+    actionStep: "",
+    deeperQuestion: "",
+  };
+
+  let current: keyof CoachReply | null = null;
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const normalized = trimmed.replace(/^[-*]\s*/, "");
+
+    if (/^reflection\s*:/i.test(normalized)) {
+      current = "reflection";
+      sections.reflection = normalized.replace(/^reflection\s*:/i, "").trim();
+      continue;
+    }
+
+    if (/^action\s*step\s*:/i.test(normalized) || /^next\s*step\s*:/i.test(normalized)) {
+      current = "actionStep";
+      sections.actionStep = normalized
+        .replace(/^action\s*step\s*:/i, "")
+        .replace(/^next\s*step\s*:/i, "")
+        .trim();
+      continue;
+    }
+
+    if (
+      /^deeper\s*question\s*:/i.test(normalized) ||
+      /^question\s*:/i.test(normalized)
+    ) {
+      current = "deeperQuestion";
+      sections.deeperQuestion = normalized
+        .replace(/^deeper\s*question\s*:/i, "")
+        .replace(/^question\s*:/i, "")
+        .trim();
+      continue;
+    }
+
+    if (current) {
+      sections[current] = `${sections[current]} ${normalized}`.trim();
+    }
+  }
+
+  if (!sections.reflection || !sections.actionStep || !sections.deeperQuestion) {
+    return null;
+  }
+
+  return sections;
+}
+
 function normalizeCoachReply(data: Record<string, unknown> | null): CoachReply | null {
   if (!data) {
     return null;
   }
 
-  const reflection = typeof data.reflection === "string" ? data.reflection.trim() : "";
-  const actionStep = typeof data.actionStep === "string" ? data.actionStep.trim() : "";
-  const deeperQuestion =
-    typeof data.deeperQuestion === "string" ? data.deeperQuestion.trim() : "";
+  const reflection = pickString(data, ["reflection", "insight", "mirror", "summary"]);
+  const actionStep = pickString(data, [
+    "actionStep",
+    "action_step",
+    "nextAction",
+    "next_action",
+    "action",
+  ]);
+  const deeperQuestion = pickString(data, [
+    "deeperQuestion",
+    "deeper_question",
+    "question",
+    "nextQuestion",
+    "next_question",
+  ]);
 
   if (!reflection || !actionStep || !deeperQuestion) {
     return null;
@@ -72,13 +201,9 @@ function normalizeSnapshot(data: Record<string, unknown> | null): PurposeSnapsho
     return null;
   }
 
-  const mission = typeof data.mission === "string" ? data.mission.trim() : "";
-  const values = Array.isArray(data.values)
-    ? data.values.filter((entry): entry is string => typeof entry === "string")
-    : [];
-  const nextActions = Array.isArray(data.nextActions)
-    ? data.nextActions.filter((entry): entry is string => typeof entry === "string")
-    : [];
+  const mission = pickString(data, ["mission", "missionStatement", "mission_statement"]);
+  const values = pickStringArray(data, ["values", "coreValues", "core_values"]);
+  const nextActions = pickStringArray(data, ["nextActions", "next_actions", "actions"]);
 
   if (!mission || values.length === 0 || nextActions.length === 0) {
     return null;
@@ -130,16 +255,58 @@ function fillActions(actions: string[]): string[] {
   return cleaned.slice(0, 3);
 }
 
-function fallbackCoachReply(input: string): CoachReply {
+function seededIndex(seedText: string, size: number): number {
+  let hash = 0;
+
+  for (let index = 0; index < seedText.length; index += 1) {
+    hash = (hash << 5) - hash + seedText.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return Math.abs(hash) % size;
+}
+
+function fallbackCoachReply(input: string, history: ChatHistoryMessage[]): CoachReply {
+  const latestUserMessage =
+    history
+      .slice()
+      .reverse()
+      .find((message) => message.role === "user")?.content ?? input;
+
+  const seed = `${input}|${latestUserMessage}|${history.length}`;
+
+  const reflections = [
+    "You are being honest about where you are, and that honesty creates momentum.",
+    "Naming this clearly is already a meaningful step toward change.",
+    "This moment sounds important, and your awareness is stronger than you think.",
+    "You are noticing something real, which gives us a practical place to start.",
+  ];
+
+  const questions = [
+    "What would progress look like by this time next week?",
+    "Which choice here feels aligned, even if it is uncomfortable?",
+    "If you removed fear for one hour, what move would you make first?",
+    "What is one boundary that would protect your energy this week?",
+  ];
+
+  const actionOpeners = [
+    "For the next 20 minutes, write down",
+    "Before the day ends, capture",
+    "In one focused session today, list",
+    "Right now, take 15 minutes and map",
+  ];
+
+  const reflection = reflections[seededIndex(seed, reflections.length)];
+  const deeperQuestion = questions[seededIndex(`${seed}:q`, questions.length)];
+  const actionOpener = actionOpeners[seededIndex(`${seed}:a`, actionOpeners.length)];
+
   return {
-    reflection:
-      "You are taking a meaningful step by putting this into words. That usually signals clarity is already starting.",
-    actionStep: `Take 15 minutes today to write: what you want more of, what you want less of, and one next action connected to "${input.slice(
+    reflection,
+    actionStep: `${actionOpener} three specifics: what you want more of, what you want less of, and one concrete next step tied to "${input.slice(
       0,
-      60,
+      80,
     )}".`,
-    deeperQuestion:
-      "If you trusted yourself 10% more this week, what decision would you make first?",
+    deeperQuestion,
   };
 }
 
@@ -200,13 +367,24 @@ export async function generateCoachReply(params: {
   const client = getOpenAiClient();
 
   if (!client) {
-    return fallbackCoachReply(params.text);
+    return fallbackCoachReply(params.text, params.history);
   }
 
-  const prompt = [
+  const baseUserMessage = [
+    "Context from the latest conversation:",
+    formatConversationContext(params.history),
+    "",
+    "Latest purpose snapshot:",
+    formatSnapshotContext(params.latestSnapshot),
+    "",
+    `Current user message: ${params.text}`,
+  ].join("\n");
+
+  const jsonPrompt = [
     "You are Soulaware, an AI life guidance coach.",
     "You are not a licensed therapist and must avoid clinical diagnosis claims.",
     "Respond with practical, compassionate coaching for adults.",
+    "Do not repeat exact wording from prior assistant messages in the context.",
     "Output strict JSON only with keys: reflection, actionStep, deeperQuestion.",
     "Each field must be one to two sentences and under 70 words.",
   ].join(" ");
@@ -214,39 +392,69 @@ export async function generateCoachReply(params: {
   try {
     const completion = await client.chat.completions.create({
       model: env.openAiModel,
-      temperature: 0.6,
+      temperature: 0.7,
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: prompt,
+          content: jsonPrompt,
         },
         {
           role: "user",
-          content: [
-            "Context from the latest conversation:",
-            formatConversationContext(params.history),
-            "",
-            "Latest purpose snapshot:",
-            formatSnapshotContext(params.latestSnapshot),
-            "",
-            `Current user message: ${params.text}`,
-          ].join("\n"),
+          content: baseUserMessage,
         },
       ],
     });
 
     const raw = completion.choices[0]?.message?.content ?? "";
-    const parsed = normalizeCoachReply(extractJsonObject(raw));
+    const parsed =
+      normalizeCoachReply(extractJsonObject(raw)) ?? parseLabeledCoachReply(raw);
 
     if (parsed) {
       return parsed;
     }
-  } catch {
-    return fallbackCoachReply(params.text);
+  } catch (error) {
+    console.error("[Soulaware] JSON coach response failed", error);
   }
 
-  return fallbackCoachReply(params.text);
+  const textPrompt = [
+    "You are Soulaware, an AI life guidance coach.",
+    "Do not use markdown, JSON, or bullet points.",
+    "Return exactly three lines in this format:",
+    "Reflection: ...",
+    "Action step: ...",
+    "Deeper question: ...",
+    "Do not repeat exact wording from prior assistant messages.",
+  ].join(" ");
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: env.openAiModel,
+      temperature: 0.8,
+      messages: [
+        {
+          role: "system",
+          content: textPrompt,
+        },
+        {
+          role: "user",
+          content: baseUserMessage,
+        },
+      ],
+    });
+
+    const raw = completion.choices[0]?.message?.content ?? "";
+    const parsed =
+      parseLabeledCoachReply(raw) ?? normalizeCoachReply(extractJsonObject(raw));
+
+    if (parsed) {
+      return parsed;
+    }
+  } catch (error) {
+    console.error("[Soulaware] Text coach response failed", error);
+  }
+
+  return fallbackCoachReply(params.text, params.history);
 }
 
 export async function generatePurposeSnapshot(params: {
@@ -303,7 +511,8 @@ export async function generatePurposeSnapshot(params: {
         nextActions: fillActions(parsed.nextActions),
       };
     }
-  } catch {
+  } catch (error) {
+    console.error("[Soulaware] Purpose snapshot generation failed", error);
     return fallbackSnapshot(params.history);
   }
 

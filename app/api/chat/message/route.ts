@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { generateCoachReply, renderCoachReply } from "@/lib/server/ai";
 import { readGuestId } from "@/lib/server/guest";
+import { enforceRateLimit } from "@/lib/server/rate-limit";
 import {
   createMessage,
   createSafetyEvent,
@@ -21,6 +22,54 @@ export async function POST(request: NextRequest) {
 
     if (!text) {
       return NextResponse.json({ error: "Message text is required." }, { status: 400 });
+    }
+
+    if (text.length > 1200) {
+      return NextResponse.json(
+        { error: "Message is too long. Keep it under 1200 characters." },
+        { status: 400 },
+      );
+    }
+
+    const linkCount = (text.match(/https?:\/\/|www\./gi) ?? []).length;
+
+    if (linkCount > 2) {
+      return NextResponse.json(
+        { error: "Too many links in one message." },
+        { status: 400 },
+      );
+    }
+
+    const forwardedFor = request.headers.get("x-forwarded-for");
+    const resolvedIp =
+      forwardedFor?.split(",")[0]?.trim() ??
+      request.headers.get("x-real-ip") ??
+      "unknown";
+
+    const [guestLimit, ipLimit] = await Promise.all([
+      enforceRateLimit(`guest:${guestId}`),
+      enforceRateLimit(`ip:${resolvedIp}`),
+    ]);
+
+    if (!guestLimit.success || !ipLimit.success) {
+      const blockedBy = guestLimit.success ? ipLimit : guestLimit;
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((blockedBy.reset - Date.now()) / 1000),
+      );
+
+      return NextResponse.json(
+        { error: "Too many messages. Please wait and try again." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfterSeconds),
+            "X-RateLimit-Limit": String(blockedBy.limit),
+            "X-RateLimit-Remaining": String(blockedBy.remaining),
+            "X-RateLimit-Reset": String(Math.floor(blockedBy.reset / 1000)),
+          },
+        },
+      );
     }
 
     const session = await getOrCreateSession(guestId);

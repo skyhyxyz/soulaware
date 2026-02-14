@@ -29,6 +29,8 @@ cp .env.example .env.local
 - `OPENAI_MODEL` (optional)
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `UPSTASH_REDIS_REST_URL` (optional but recommended for production rate limits)
+- `UPSTASH_REDIS_REST_TOKEN` (optional but recommended for production rate limits)
 
 4. Run the app:
 
@@ -75,6 +77,13 @@ Tables included:
 - If high risk is triggered, Soulaware returns safety-only guidance with US resources:
   - Call/text `988`
   - Call `911` for immediate danger
+
+## Abuse Protection
+
+- Chat endpoint enforces request limits by guest and IP.
+- Upstash Redis is used when configured.
+- If Upstash env vars are missing, a local in-memory limiter is used as fallback.
+- Over-limit requests return `429 Too Many Requests`.
 
 ## Notes
 
