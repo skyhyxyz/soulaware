@@ -8,7 +8,7 @@ export default function LegalPage() {
         <header className="space-y-2">
           <h1 className="text-3xl font-semibold text-stone-900">Legal & Safety</h1>
           <p className="text-sm text-stone-700">
-            Soulaware is built as a non-clinical AI coaching experience for adults
+            SoulAware is built as a non-clinical AI coaching experience for adults
             (18+).
           </p>
         </header>
@@ -16,7 +16,7 @@ export default function LegalPage() {
         <section className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-5">
           <h2 className="text-lg font-semibold text-amber-950">Non-clinical disclaimer</h2>
           <p className="text-sm leading-7 text-amber-900">
-            Soulaware is not a licensed therapist and does not provide medical or
+            SoulAware is not a licensed therapist and does not provide medical or
             psychiatric diagnosis, treatment, or crisis counseling. Use this app for
             personal reflection, planning, and coaching support.
           </p>
@@ -38,7 +38,7 @@ export default function LegalPage() {
         <section className="space-y-3">
           <h2 className="text-lg font-semibold text-stone-900">Data handling summary</h2>
           <p className="text-sm leading-7 text-stone-700">
-            Soulaware stores guest session content (chat, snapshots, and safety events)
+            SoulAware stores guest session content (chat, snapshots, and safety events)
             to provide continuity across refreshes. You can clear your local session or
             permanently delete all stored guest data at any time.
           </p>

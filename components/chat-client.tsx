@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trackClientEvent } from "@/lib/client/analytics";
@@ -35,12 +35,12 @@ function MessageContent({ content }: { content: string }) {
   if (snapshotPath) {
     return (
       <div className="space-y-2">
-        <p className="whitespace-pre-wrap break-words text-sm leading-6 text-stone-100">
+        <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
           {content.replace(snapshotPath, "")}
         </p>
         <Link
           href={snapshotPath}
-          className="inline-flex rounded-full bg-amber-300 px-4 py-2 text-xs font-semibold text-stone-900"
+          className="inline-flex rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
         >
           Open your snapshot
         </Link>
@@ -49,7 +49,7 @@ function MessageContent({ content }: { content: string }) {
   }
 
   return (
-    <p className="whitespace-pre-wrap break-words text-sm leading-6 text-stone-100">
+    <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
       {content}
     </p>
   );
@@ -57,6 +57,7 @@ function MessageContent({ content }: { content: string }) {
 
 export function ChatClient() {
   const router = useRouter();
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [sessionId, setSessionId] = useState<string>("");
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
@@ -88,6 +89,19 @@ export function ChatClient() {
 
     window.localStorage.setItem(LAST_SEEN_KEY, `${now}`);
   }, []);
+
+  useEffect(() => {
+    const transcriptElement = transcriptRef.current;
+
+    if (!transcriptElement) {
+      return;
+    }
+
+    transcriptElement.scrollTo({
+      top: transcriptElement.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, isLoading]);
 
   useEffect(() => {
     let cancelled = false;
@@ -240,90 +254,148 @@ export function ChatClient() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-4 py-6 md:px-8">
-      <header className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-stone-800">
-        <p className="font-semibold">Soulaware is non-clinical guidance.</p>
-        <p>
-          If you are in immediate danger, call <strong>911</strong>. For emotional
-          crisis support in the US, call or text <strong>988</strong>.
-        </p>
-      </header>
-
-      {safetyPanel ? (
-        <section className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-4 text-sm text-rose-900">
-          <h2 className="text-base font-semibold">Safety Support</h2>
-          <p className="mt-1 whitespace-pre-wrap">{safetyPanel}</p>
-        </section>
-      ) : null}
-
-      <section className="flex-1 rounded-3xl border border-stone-200 bg-stone-950/95 p-4 shadow-sm md:p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-stone-100">Soulaware Chat</h1>
+    <div className="mx-auto w-full max-w-6xl space-y-4">
+      <section className="sa-panel rounded-3xl px-4 py-4 md:px-6 md:py-6">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900 md:text-2xl">
+              SoulAware Chat
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Strategic life guidance for direction, decisions, and follow-through.
+            </p>
+          </div>
           <button
             type="button"
             onClick={handleCreateSnapshot}
             disabled={isLoading || isSnapshotLoading}
-            className="rounded-full bg-amber-300 px-4 py-2 text-xs font-semibold text-stone-900 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-70"
+            className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isSnapshotLoading ? "Creating..." : "Create Purpose Snapshot"}
           </button>
         </div>
 
-        <div className="h-[58vh] space-y-3 overflow-y-auto rounded-2xl border border-stone-800 bg-stone-900/90 p-3">
-          {messages.length === 0 ? (
-            <p className="text-sm text-stone-300">
-              Start with what matters most to you right now. Soulaware will reflect,
-              coach, and help you identify one practical next step.
-            </p>
-          ) : null}
+        <header className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-amber-50 to-white px-4 py-3 text-sm text-slate-700">
+          <p className="font-semibold text-slate-900">
+            SoulAware is non-clinical guidance.
+          </p>
+          <p>
+            If you are in immediate danger, call <strong>911</strong>. For emotional
+            crisis support in the US, call or text <strong>988</strong>.
+          </p>
+        </header>
 
-          {messages.map((message) => (
-            <article
-              key={message.id}
-              className={`max-w-[92%] rounded-2xl px-4 py-3 ${
-                message.role === "user"
-                  ? "ml-auto bg-amber-300 text-stone-950"
-                  : "mr-auto bg-stone-700 text-stone-100"
-              }`}
+        {safetyPanel ? (
+          <section className="mt-4 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-4 text-sm text-rose-900">
+            <h2 className="text-base font-semibold">Safety Support</h2>
+            <p className="mt-1 whitespace-pre-wrap">{safetyPanel}</p>
+          </section>
+        ) : null}
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
+          <section className="space-y-4">
+            <div
+              ref={transcriptRef}
+              className="h-[56vh] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 md:p-4"
             >
-              {message.role === "assistant" ? (
-                <MessageContent content={message.content} />
-              ) : (
-                <p className="whitespace-pre-wrap break-words text-sm leading-6">
-                  {message.content}
+              {messages.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4">
+                  <p className="text-sm text-slate-700">
+                    Start with the decision, challenge, or life area that matters most
+                    right now. SoulAware will help you clarify and pick one practical
+                    next move.
+                  </p>
+                </div>
+              ) : null}
+
+              {messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`sa-message-enter max-w-[94%] rounded-2xl border px-4 py-3 shadow-sm ${
+                    message.role === "user"
+                      ? "ml-auto border-amber-300/80 bg-gradient-to-br from-amber-100 to-amber-200 text-slate-900"
+                      : "mr-auto border-slate-200 bg-slate-50 text-slate-900"
+                  }`}
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p
+                      className={`text-[11px] font-semibold tracking-[0.08em] uppercase ${
+                        message.role === "user" ? "text-slate-700" : "text-slate-500"
+                      }`}
+                    >
+                      {message.role === "user" ? "You" : "SoulAware"}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {formatTimestamp(message.createdAt)}
+                    </p>
+                  </div>
+
+                  {message.role === "assistant" ? (
+                    <MessageContent content={message.content} />
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                      {message.content}
+                    </p>
+                  )}
+                </article>
+              ))}
+
+              {isLoading ? (
+                <p className="text-xs text-slate-500">SoulAware is thinking...</p>
+              ) : null}
+            </div>
+
+            <form onSubmit={handleSendMessage} className="space-y-2">
+              <label
+                htmlFor="chat-input"
+                className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500"
+              >
+                Your message
+              </label>
+              <textarea
+                id="chat-input"
+                rows={4}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="Share what you are feeling, facing, or deciding..."
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">
+                  Session ID: <span className="font-mono">{sessionId || "loading"}</span>
                 </p>
-              )}
-              <p className="mt-2 text-[11px] opacity-70">{formatTimestamp(message.createdAt)}</p>
-            </article>
-          ))}
+                <button
+                  type="submit"
+                  disabled={!canSend}
+                  className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  Send
+                </button>
+              </div>
+            </form>
+          </section>
 
-          {isLoading ? (
-            <p className="text-xs text-stone-300">Soulaware is thinking...</p>
-          ) : null}
+          <aside className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-slate-100">
+            <h2 className="text-sm font-semibold tracking-[0.06em] uppercase text-slate-300">
+              Session Focus
+            </h2>
+            <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-100">
+              <li>Share one concrete challenge or decision.</li>
+              <li>Name one value you want to honor this week.</li>
+              <li>End with one action you can complete today.</li>
+            </ul>
+            <div className="mt-5 rounded-xl border border-slate-700 bg-slate-800/90 p-3">
+              <p className="text-xs text-slate-300">Need immediate support resources?</p>
+              <Link
+                href="/legal"
+                className="mt-1 inline-flex text-sm font-semibold text-amber-300 hover:text-amber-200"
+              >
+                Open Legal & Safety
+              </Link>
+            </div>
+          </aside>
         </div>
-
-        <form onSubmit={handleSendMessage} className="mt-4 space-y-2">
-          <textarea
-            rows={3}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Share what you are feeling, facing, or deciding..."
-            className="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 text-sm text-stone-100 outline-none ring-amber-300 focus:ring"
-          />
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-stone-300">
-              Session ID: <span className="font-mono">{sessionId || "loading"}</span>
-            </p>
-            <button
-              type="submit"
-              disabled={!canSend}
-              className="rounded-full bg-amber-300 px-5 py-2 text-sm font-semibold text-stone-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              Send
-            </button>
-          </div>
-        </form>
       </section>
 
       {error ? (
@@ -334,21 +406,21 @@ export function ChatClient() {
 
       {!isDisclaimerAccepted ? (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-stone-950/55 p-4">
-          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-xl">
-            <h2 className="text-xl font-semibold text-stone-900">Before you begin</h2>
-            <p className="mt-2 text-sm text-stone-700">
-              Soulaware is an AI life guidance coach, not a licensed therapist. It
-              can support reflection and planning, but it is not a substitute for
+          <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="text-xl font-semibold text-slate-900">Before you begin</h2>
+            <p className="mt-2 text-sm text-slate-700">
+              SoulAware is an AI life guidance coach, not a licensed therapist. It can
+              support reflection and planning, but it is not a substitute for
               professional mental health care.
             </p>
-            <p className="mt-2 text-sm text-stone-700">
+            <p className="mt-2 text-sm text-slate-700">
               If you may harm yourself or others, call <strong>911</strong> now or
               call/text <strong>988</strong> in the US.
             </p>
             <button
               type="button"
               onClick={acceptDisclaimer}
-              className="mt-5 rounded-full bg-stone-900 px-5 py-2 text-sm font-semibold text-white"
+              className="mt-5 rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               I understand and want to continue
             </button>

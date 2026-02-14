@@ -8,7 +8,7 @@ export default function SettingsPage() {
         <header className="space-y-2">
           <h1 className="text-3xl font-semibold text-stone-900">Guest Settings</h1>
           <p className="text-sm text-stone-700">
-            Manage your current Soulaware guest session and data controls.
+            Manage your current SoulAware guest session and data controls.
           </p>
         </header>
 

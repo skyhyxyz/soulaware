@@ -8,7 +8,7 @@ export function DeleteDataButton() {
 
   async function handleDelete() {
     const shouldDelete = window.confirm(
-      "Delete all Soulaware guest data now? This cannot be undone.",
+      "Delete all SoulAware guest data now? This cannot be undone.",
     );
 
     if (!shouldDelete) {

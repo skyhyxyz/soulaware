@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f0e9;
-  --foreground: #1e1a17;
+  --background: #f2f4f8;
+  --foreground: #101526;
+  --brand-ink: #11213f;
+  --brand-gold: #d8ab4a;
+  --brand-slate: #5a667f;
 }
 
 @theme inline {
@@ -35,4 +38,49 @@ h5,
 h6 {
   font-family: "Palatino", "Times New Roman", serif;
   letter-spacing: -0.015em;
+}
+
+.sa-wordmark-soul {
+  font-family: "Palatino", "Times New Roman", serif;
+  font-size: clamp(1.15rem, 1.8vw, 1.55rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--brand-ink);
+}
+
+.sa-wordmark-aware {
+  font-family: "Palatino", "Times New Roman", serif;
+  font-size: clamp(1.15rem, 1.8vw, 1.55rem);
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--brand-gold);
+}
+
+.sa-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 252, 0.96));
+  border: 1px solid rgba(17, 33, 63, 0.1);
+  box-shadow: 0 20px 60px rgba(16, 21, 38, 0.08);
+}
+
+.sa-chat-shell {
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(216, 171, 74, 0.18), transparent 40%),
+    radial-gradient(900px 500px at 95% -20%, rgba(44, 91, 187, 0.14), transparent 42%),
+    linear-gradient(180deg, #eef2f8 0%, #ebeff7 100%);
+}
+
+.sa-message-enter {
+  animation: sa-fade-up 0.28s ease-out;
+}
+
+@keyframes sa-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

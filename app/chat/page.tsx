@@ -1,23 +1,29 @@
 import Link from "next/link";
 import { ChatClient } from "@/components/chat-client";
+import { BrandWordmark } from "@/components/brand-wordmark";
 
 export default function ChatPage() {
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#fff8e1,#f6f1e8_40%,#ebe6de)] pb-10">
-      <nav className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-5 md:px-8">
-        <Link href="/" className="text-lg font-semibold text-stone-900">
-          Soulaware
-        </Link>
-        <div className="flex items-center gap-3 text-sm text-stone-700">
-          <Link href="/legal" className="hover:text-stone-900">
-            Legal & Safety
-          </Link>
-          <Link href="/settings" className="hover:text-stone-900">
-            Settings
-          </Link>
-        </div>
-      </nav>
-      <ChatClient />
+    <main className="sa-chat-shell min-h-screen px-4 pb-10 pt-5 md:px-8 md:pb-12 md:pt-8">
+      <div className="mx-auto w-full max-w-6xl space-y-4">
+        <header className="sa-panel rounded-3xl px-5 py-4 md:px-7 md:py-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <BrandWordmark
+              subtitle="Strategic life guidance for purpose, career, and clarity"
+            />
+            <nav className="flex items-center gap-4 text-sm font-medium text-slate-600">
+              <Link href="/legal" className="transition hover:text-slate-900">
+                Legal & Safety
+              </Link>
+              <Link href="/settings" className="transition hover:text-slate-900">
+                Settings
+              </Link>
+            </nav>
+          </div>
+        </header>
+
+        <ChatClient />
+      </div>
     </main>
   );
 }

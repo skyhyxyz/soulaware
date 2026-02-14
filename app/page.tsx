@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { BrandWordmark } from "@/components/brand-wordmark";
 
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_10%_10%,#ffe9a8,#f4eee5_45%,#e9e2d6)] px-5 py-8 md:px-10 md:py-10">
       <div className="mx-auto flex min-h-[88vh] w-full max-w-6xl flex-col rounded-[2rem] border border-stone-200/80 bg-white/80 p-6 shadow-xl backdrop-blur md:p-10">
         <header className="flex items-center justify-between">
-          <p className="text-lg font-semibold tracking-tight text-stone-900">Soulaware</p>
+          <BrandWordmark />
           <Link
             href="/legal"
             className="text-sm font-medium text-stone-700 transition hover:text-stone-900"
@@ -23,7 +24,7 @@ export default function HomePage() {
               Discover your soul&apos;s true direction with guided AI coaching.
             </h1>
             <p className="max-w-xl text-base leading-7 text-stone-700 md:text-lg">
-              Soulaware is an AI life guidance coach that helps you reflect, map
+              SoulAware is an AI life guidance coach that helps you reflect, map
               purpose, and choose practical next actions across life, career, and
               meaning.
             </p>

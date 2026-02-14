@@ -37,7 +37,7 @@ export function SettingsActions() {
 
   async function deleteAllData() {
     const shouldContinue = window.confirm(
-      "Delete all Soulaware data for this guest profile? This cannot be undone.",
+      "Delete all SoulAware data for this guest profile? This cannot be undone.",
     );
 
     if (!shouldContinue) {
